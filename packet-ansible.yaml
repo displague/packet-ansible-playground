@@ -1,0 +1,55 @@
+---
+- name: Pip install into system python
+  pip:
+    name: ""
+  with_items:
+    - packet
+- name: setup Packet host
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - .env
+  tasks:
+  - name: create Packet host with error handling
+    block:
+    - name: create Packet host {{ packet_hostname }}
+      packet_device:
+        auth_token: "{{ packet_auth_token }}"
+        project_id: "{{ packet_project_id }}"
+        hostnames: "{{ packet_hostname }}"
+        operating_system: centos_8
+        plan: t1.small.x86
+        facility: any
+        wait_for_public_IPv: 4
+        state: active
+      register: hosts
+      no_log: false
+    - name: Add to group
+      add_host:
+        hostname: "{{ item.public_ipv4 }}"
+        group: launched
+        ansible_user: root
+      with_items: "{{ hosts.devices }}"
+    - name: wait for ssh
+      wait_for:
+        delay: 5
+        host: "{{ item.public_ipv4 }}"
+        port: 22
+        state: started
+        timeout: 900
+      with_items: "{{ hosts.devices }}"
+    rescue:
+    - name: fail the play
+      fail:
+        msg: "ERROR: Packet setup failed."
+  - name: save Packet IP
+    local_action: copy content="{{ hosts.devices[0].public_ipv4 }}" dest="./server-ip"
+    with_items: "{{ hosts.devices }}"
+- name: Configure packages
+  hosts: launched
+  gather_facts: True
+  tasks:
+    - name: install screen
+      dnf:
+        name: screen
+        state: latest
